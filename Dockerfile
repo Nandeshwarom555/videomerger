@@ -1,20 +1,29 @@
+# Use the official Python image
 FROM python:3.10-slim
 
-# Install ffmpeg and other dependencies
-RUN apt-get update && \
-    apt-get install -y ffmpeg && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Set working directory
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    && apt-get clean
+
+# Set the working directory
 WORKDIR /app
 
-# Copy and install Python dependencies
+# Copy the requirements file and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy bot code
+# Copy the rest of the application code
 COPY . .
 
-# Run the bot
-CMD ["python", "-u", "main.py"]
+# Expose the port for the health check server
+EXPOSE 8000
+
+# Command to run the application
+CMD ["python", "main.py"]
