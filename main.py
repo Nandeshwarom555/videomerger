@@ -1,6 +1,5 @@
 import os
 import uuid
-import subprocess
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -71,7 +70,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➕ Upload More", callback_data="upload_more")],
         [InlineKeyboardButton("🛠 Merge Now", callback_data="merge_now")]
     ]
-    await update.message.reply_text("What would you like to do next?", reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("What would you like to do next?", reply_markup=reply_markup)
 
 # /merge command
 async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
