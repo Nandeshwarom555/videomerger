@@ -43,7 +43,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_videos[user_id] = []
     await update.message.reply_text("✅ Cleared your uploaded videos. You can send new ones now.")
 
-# Handle video files
+# Handle incoming videos
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id not in user_videos:
@@ -64,27 +64,16 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(filename)
 
     user_videos[user_id].append(filename)
-    
-    # Confirmation + buttons
-    await update.message.reply_text(
-        f"✅ Video received! You’ve uploaded {len(user_videos[user_id])} video(s)."
-    )
+    await update.message.reply_text(f"✅ Video received! You've uploaded {len(user_videos[user_id])} video(s).")
 
+    # Show buttons after file is received
     keyboard = [
         [InlineKeyboardButton("➕ Upload More", callback_data="upload_more")],
         [InlineKeyboardButton("🛠 Merge Now", callback_data="merge_now")]
     ]
-    await update.message.reply_text(
-        "What would you like to do next?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("What would you like to do next?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# /merge command
-async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    await do_merge(user_id, update.message, context)
-
-# Callback buttons
+# Handle callback buttons
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -96,7 +85,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Merging your videos...")
         await do_merge(user_id, query.message, context)
 
-# Merging logic
+# /merge command (alternative to button)
+async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    await do_merge(user_id, update.message, context)
+
+# Perform merging
 async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
     videos = user_videos.get(user_id, [])
     if len(videos) < 2:
@@ -107,7 +101,7 @@ async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         clips = [VideoFileClip(v) for v in videos]
-        final_clip = concatenate_videoclips(clips)
+        final_clip = concatenate_videoclips(clips, method="compose")
         output_path = f"/tmp/merged_{uuid.uuid4()}.mp4"
         final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
 
