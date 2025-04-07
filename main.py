@@ -39,49 +39,49 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_videos:
         user_videos[user_id] = []
 
-    video = update.message.video
+    video = update.message.video or update.message.document
+    if not video:
+        await update.message.reply_text("❌ Please send a valid video file (.mp4 or .mkv).")
+        return
+
     file = await video.get_file()
     filename = f"/tmp/{uuid.uuid4()}.mp4"
     await file.download_to_drive(filename)
 
     user_videos[user_id].append(filename)
-    await update.message.reply_text(f"📥 Video saved! Total: {len(user_videos[user_id])} video(s) uploaded.")
+    await update.message.reply_text(f"✅ Video received! You've uploaded {len(user_videos[user_id])} video(s).")
 
     keyboard = [
         [InlineKeyboardButton("➕ Upload More", callback_data="upload_more")],
         [InlineKeyboardButton("🛠 Merge Now", callback_data="merge_now")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("What would you like to do next?", reply_markup=reply_markup)
+    await update.message.reply_text("What would you like to do next?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Handle button presses
+# Handle button clicks
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
+    await query.answer()
 
     if query.data == "upload_more":
-        await query.edit_message_text("✅ Okay! Send another video.")
+        await query.edit_message_text("📤 Please send another video.")
     elif query.data == "merge_now":
-        await merge(update, context, is_callback=True)
+        await query.edit_message_text("🛠 Preparing to merge your videos...")
+        await do_merge(user_id, query.message, context)
 
-# Merge command or button trigger
-async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=False):
-    user_id = update.effective_user.id
+# Handle /merge command
+async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    await do_merge(user_id, update.message, context)
+
+# Merge videos
+async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
     videos = user_videos.get(user_id, [])
-
     if len(videos) < 2:
-        msg = "❗ You need to upload at least two videos to merge."
-        if is_callback:
-            await update.callback_query.edit_message_text(msg)
-        else:
-            await update.message.reply_text(msg)
+        await reply_target.reply_text("❗ You need to upload at least two videos to merge.")
         return
 
-    if is_callback:
-        await update.callback_query.edit_message_text("🔧 Merging videos. Please wait...")
-    else:
-        await update.message.reply_text("🔧 Merging videos. Please wait...")
+    await reply_target.reply_text("⏳ Merging videos. Please wait...")
 
     try:
         clips = [VideoFileClip(v) for v in videos]
@@ -92,9 +92,8 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=
         await context.bot.send_video(chat_id=user_id, video=open(output_path, "rb"))
 
     except Exception as e:
-        logger.error(f"Error during merge: {e}")
-        await context.bot.send_message(chat_id=user_id, text=f"❌ Merge failed: {e}")
-
+        logger.error(f"Merge error: {e}")
+        await reply_target.reply_text(f"❌ Merge failed: {e}")
     finally:
         for f in videos:
             if os.path.exists(f):
@@ -103,7 +102,7 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=
             os.remove(output_path)
         user_videos[user_id] = []
 
-# Health check server
+# Health check
 def start_health_server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -117,19 +116,18 @@ def start_health_server():
 
     threading.Thread(target=run, daemon=True).start()
 
-# Main
+# Start bot
 def main():
     start_health_server()
 
-    application = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(CommandHandler("merge", merge))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video))
+    app.add_handler(CallbackQueryHandler(button))
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset", reset))
-    application.add_handler(CommandHandler("merge", merge))
-    application.add_handler(MessageHandler(filters.VIDEO, handle_video))
-    application.add_handler(CallbackQueryHandler(button))
-
-    application.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
