@@ -12,14 +12,14 @@ from telegram.ext import (
 )
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
-# Logging
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# In-memory store for user video uploads
+# Store for user-uploaded videos
 user_videos = {}
 
-# Health check server for Koyeb
+# Start a simple HTTP health check server for Koyeb
 def start_health_server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -33,17 +33,17 @@ def start_health_server():
 
     threading.Thread(target=run, daemon=True).start()
 
-# /start command
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Send me at least 2 videos (.mp4 or .mkv), then press 'Merge Now'!")
 
-# /reset command
+# /reset command handler
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     user_videos[user_id] = []
     await update.message.reply_text("✅ Cleared your uploaded videos. You can send new ones now.")
 
-# Handle video files
+# Handle video uploads
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id not in user_videos:
@@ -64,21 +64,17 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(filename)
     user_videos[user_id].append(filename)
 
-    # Confirmation message and options
-    await update.message.reply_text(
-        f"✅ Received video {len(user_videos[user_id])}.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Upload More", callback_data="upload_more")],
-            [InlineKeyboardButton("🛠 Merge Now", callback_data="merge_now")]
-        ])
-    )
+    # Confirmation message
+    await update.message.reply_text(f"✅ Video received! You’ve uploaded {len(user_videos[user_id])} video(s).")
 
-# /merge command
-async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    await do_merge(user_id, update.message, context)
+    # Buttons
+    keyboard = [
+        [InlineKeyboardButton("➕ Upload More", callback_data="upload_more")],
+        [InlineKeyboardButton("🛠 Merge Now", callback_data="merge_now")]
+    ]
+    await update.message.reply_text("What would you like to do next?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Callback buttons
+# Callback button handler
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -90,7 +86,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Merging your videos...")
         await do_merge(user_id, query.message, context)
 
-# Merging logic
+# /merge command handler (optional)
+async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    await do_merge(user_id, update.message, context)
+
+# Merge logic
 async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
     videos = user_videos.get(user_id, [])
     if len(videos) < 2:
@@ -110,7 +111,6 @@ async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Merge error: {e}")
         await reply_target.reply_text(f"❌ Merge failed: {e}")
     finally:
-        # Cleanup
         for v in videos:
             try:
                 os.remove(v)
@@ -123,15 +123,16 @@ async def do_merge(user_id, reply_target, context: ContextTypes.DEFAULT_TYPE):
                 pass
         user_videos[user_id] = []
 
-# Main function
+# Main bot startup
 def main():
     start_health_server()
 
     token = os.getenv("BOT_TOKEN")
     if not token:
-        raise Exception("❌ BOT_TOKEN environment variable not set.")
+        raise Exception("❌ BOT_TOKEN environment variable not set!")
 
     app = Application.builder().token(token).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("merge", merge))
