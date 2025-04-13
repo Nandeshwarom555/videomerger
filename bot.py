@@ -6,11 +6,21 @@ import subprocess
 import threading
 from uuid import uuid4
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 from flask import Flask
 
 # Logging setup
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG  # Set to DEBUG for more detailed logs
+)
 logger = logging.getLogger(__name__)
 
 user_sessions = {}
@@ -18,6 +28,7 @@ MAX_FILE_SIZE_MB = 2000
 
 # --- Command: /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.debug("/start command triggered")
     user_sessions[update.effective_user.id] = {
         "videos": [],
         "tempdir": tempfile.mkdtemp(),
@@ -31,6 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Command: /cancel ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    logger.debug("/cancel command from user: %s", user_id)
     if user_id in user_sessions:
         user_sessions[user_id]["cancel"] = True
         await update.message.reply_text("Operation cancelled.")
@@ -39,6 +51,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Handle Video Uploads ---
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.debug("Received video or document")
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
 
@@ -217,7 +230,7 @@ def cleanup_session(user_id):
     shutil.rmtree(user_sessions[user_id]["tempdir"], ignore_errors=True)
     del user_sessions[user_id]
 
-# --- Flask App (MUST be named 'app') ---
+# --- Flask App ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -227,6 +240,10 @@ def home():
 # --- Telegram Bot Start ---
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        logger.error("BOT_TOKEN not found in environment variables!")
+        return
+
     telegram_app = ApplicationBuilder().token(TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start))
@@ -238,7 +255,8 @@ def main():
     telegram_app.add_handler(CallbackQueryHandler(handle_choice, pattern="compress|split"))
     telegram_app.add_handler(CallbackQueryHandler(skip_thumbnail, pattern="skip_thumbnail"))
 
-    telegram_app.run_polling()
+    logger.info("Bot polling started...")
+    telegram_app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
