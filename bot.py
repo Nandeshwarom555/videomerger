@@ -1,5 +1,3 @@
-# ✅ FULL UPDATED CODE FOR KOYEB DEPLOYMENT WITH WEBHOOK + HEALTH CHECK
-
 import os
 import logging
 import shutil
@@ -7,33 +5,18 @@ import tempfile
 import subprocess
 import threading
 from uuid import uuid4
-from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import (Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-                          ContextTypes, filters)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from flask import Flask
 
-# --- Logging setup ---
+# Logging setup
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Session Storage ---
 user_sessions = {}
 MAX_FILE_SIZE_MB = 2000
 
-# --- Flask App for Webhook & Health Check ---
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    application.update_queue.put_nowait(update)
-    return 'ok'
-
-# --- Telegram Bot Logic ---
+# --- Command: /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_sessions[update.effective_user.id] = {
         "videos": [],
@@ -45,6 +28,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await update.message.reply_text("Send me multiple video files. When you're done, press the 'Merge Videos' button.")
 
+# --- Command: /cancel ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in user_sessions:
@@ -53,6 +37,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Nothing to cancel.")
 
+# --- Handle Video Uploads ---
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
@@ -80,9 +65,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("Click below when you're done uploading:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# --- Handle Thumbnail Upload ---
 async def handle_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
+
     if not session or not session.get("waiting_for_thumbnail"):
         return
 
@@ -99,6 +86,7 @@ async def handle_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session["waiting_for_thumbnail"] = False
     await update.message.reply_text("Thumbnail received. Sending final video now...")
 
+# --- Skip Thumbnail Option ---
 async def skip_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
@@ -109,6 +97,7 @@ async def skip_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session["waiting_for_thumbnail"] = False
     await update.message.reply_text("You have skipped the thumbnail. Sending final video now...")
 
+# --- Merge Button Handler ---
 async def handle_merge_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -138,24 +127,26 @@ async def handle_merge_button(update: Update, context: ContextTypes.DEFAULT_TYPE
                     [InlineKeyboardButton("🗜 Compress to under 2GB", callback_data="compress")],
                     [InlineKeyboardButton("✂ Split into 2GB parts", callback_data="split")]
                 ]
-                application.bot.send_message(chat_id=user_id, text="Output is too large (>2GB). Choose an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+                context.bot.send_message(chat_id=user_id, text="Output is too large (>2GB). Choose an option:", reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
             preview_path = generate_preview(output_path, session["tempdir"])
-            application.bot.send_video(chat_id=user_id, video=open(preview_path, 'rb'), caption="Here is a 30s preview. Now send me a custom thumbnail image or skip it.")
+            context.bot.send_video(chat_id=user_id, video=open(preview_path, 'rb'), caption="Here is a 30s preview. Now send me a custom thumbnail image or skip it.")
             session["waiting_for_thumbnail"] = True
         except Exception as e:
             logger.error("Merge failed: %s", str(e))
-            application.bot.send_message(chat_id=user_id, text="Merging failed.")
+            context.bot.send_message(chat_id=user_id, text="Merging failed.")
             session["merging"] = False
             shutil.rmtree(session["tempdir"], ignore_errors=True)
             del user_sessions[user_id]
 
     threading.Thread(target=merge_task).start()
 
+# --- Handle Compress or Split ---
 async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     user_id = query.from_user.id
     session = user_sessions[user_id]
     output_path = os.path.join(session["tempdir"], "merged_output.mp4")
@@ -175,19 +166,22 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text="All parts sent!")
         cleanup_session(user_id)
 
-async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    session = user_sessions.get(user_id)
+# --- Generate 30s Preview ---
+def generate_preview(video_path, tempdir):
+    preview_path = os.path.join(tempdir, "preview.mp4")
+    subprocess.run(["ffmpeg", "-i", video_path, "-t", "30", "-c:v", "libx264", "-c:a", "aac", "-y", preview_path])
+    return preview_path
 
-    if not session or not session["merging"]:
-        await query.edit_message_text("No active merging process.")
-        return
+# --- Split Large Video into Parts ---
+def split_video(input_path, tempdir, max_mb):
+    split_cmd = [
+        "ffmpeg", "-i", input_path, "-c", "copy", "-f", "segment", "-segment_time", "600",
+        os.path.join(tempdir, "part%03d.mp4")
+    ]
+    subprocess.run(split_cmd)
+    return [os.path.join(tempdir, f) for f in os.listdir(tempdir) if f.startswith("part")]
 
-    progress = session.get("progress", "Waiting for update...")
-    await query.edit_message_text(f"🔄 Merging in progress...\n\n{progress}")
-
+# --- Merge Core Logic ---
 def merge_videos(input_paths, output_path, session):
     tempdir = tempfile.mkdtemp()
     reencoded = []
@@ -204,39 +198,47 @@ def merge_videos(input_paths, output_path, session):
     subprocess.run(["ffmpeg", "-f", "concat", "-safe", "0", "-i", concat_list, "-c", "copy", "-y", output_path])
     shutil.rmtree(tempdir, ignore_errors=True)
 
-def generate_preview(video_path, tempdir):
-    preview_path = os.path.join(tempdir, "preview.mp4")
-    subprocess.run(["ffmpeg", "-i", video_path, "-t", "30", "-c:v", "libx264", "-c:a", "aac", "-y", preview_path])
-    return preview_path
+# --- Status Button ---
+async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    session = user_sessions.get(user_id)
 
-def split_video(input_path, tempdir, max_mb):
-    split_cmd = ["ffmpeg", "-i", input_path, "-c", "copy", "-f", "segment", "-segment_time", "600", os.path.join(tempdir, "part%03d.mp4")]
-    subprocess.run(split_cmd)
-    return [os.path.join(tempdir, f) for f in os.listdir(tempdir) if f.startswith("part")]
+    if not session or not session["merging"]:
+        await query.edit_message_text("No active merging process.")
+        return
 
+    progress = session.get("progress", "Waiting for update...")
+    await query.edit_message_text(f"🔄 Merging in progress...\n\n{progress}")
+
+# --- Cleanup Session ---
 def cleanup_session(user_id):
     shutil.rmtree(user_sessions[user_id]["tempdir"], ignore_errors=True)
     del user_sessions[user_id]
 
-# --- Launch Everything ---
-TOKEN = os.getenv("BOT_TOKEN")
-APP_URL = os.getenv("APP_URL")  # e.g., https://your-app-name.koyeb.app
+# --- Flask App (MUST be named 'app') ---
+app = Flask(__name__)
 
-application = Application.builder().token(TOKEN).build()
-bot = application.bot
+@app.route('/')
+def home():
+    return "Bot is running!"
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("cancel", cancel))
-application.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video))
-application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_thumbnail))
-application.add_handler(CallbackQueryHandler(handle_merge_button, pattern="merge_videos"))
-application.add_handler(CallbackQueryHandler(handle_status, pattern="check_status"))
-application.add_handler(CallbackQueryHandler(handle_choice, pattern="compress|split"))
-application.add_handler(CallbackQueryHandler(skip_thumbnail, pattern="skip_thumbnail"))
+# --- Telegram Bot Start ---
+def main():
+    TOKEN = os.getenv("BOT_TOKEN")
+    telegram_app = ApplicationBuilder().token(TOKEN).build()
 
-# Set webhook
-if APP_URL:
-    bot.set_webhook(f"{APP_URL}/webhook")
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("cancel", cancel))
+    telegram_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_thumbnail))
+    telegram_app.add_handler(CallbackQueryHandler(handle_merge_button, pattern="merge_videos"))
+    telegram_app.add_handler(CallbackQueryHandler(handle_status, pattern="check_status"))
+    telegram_app.add_handler(CallbackQueryHandler(handle_choice, pattern="compress|split"))
+    telegram_app.add_handler(CallbackQueryHandler(skip_thumbnail, pattern="skip_thumbnail"))
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000)
+    telegram_app.run_polling()
+
+if __name__ == "__main__":
+    main()
