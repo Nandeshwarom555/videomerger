@@ -1,9 +1,15 @@
-from flask import Flask
-app = Flask(__name__)
+import requests
 
-@app.route('/health')
-def health_check():
-    return 'OK', 200
+def check_health():
+    url = "http://127.0.0.1:8000"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            print("Health check passed.")
+        else:
+            print(f"Health check failed with status code {response.status_code}.")
+    except Exception as e:
+        print(f"Health check failed with error: {e}")
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8000)
+    check_health()
