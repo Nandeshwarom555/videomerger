@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import subprocess
 import threading
+import asyncio
 from uuid import uuid4
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -207,11 +208,4 @@ def start_bot():
     telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_thumbnail))
     telegram_app.add_handler(CallbackQueryHandler(handle_merge_button, pattern="merge_videos"))
     telegram_app.add_handler(CallbackQueryHandler(handle_status, pattern="check_status"))
-    telegram_app.add_handler(CallbackQueryHandler(handle_choice, pattern="compress|split"))
-    telegram_app.add_handler(CallbackQueryHandler(skip_thumbnail, pattern="skip_thumbnail"))
-
-    print("✅ Starting Telegram bot polling...")
-    telegram_app.run_polling()
-
-# --- Start polling in background ---
-threading.Thread(target=start_bot, daemon=True).start()
+    telegram_app.add_handler(CallbackQueryHandler(handle_choice, pattern="
