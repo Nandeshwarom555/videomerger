@@ -219,9 +219,9 @@ def cleanup_session(user_id):
     del user_sessions[user_id]
 
 # --- Initialize Flask App ---
-flask_app = Flask(__name__)
+app = Flask(__name__)
 
-@flask_app.route('/')
+@app.route('/')
 def home():
     return "Bot is running!"
 
@@ -243,4 +243,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    flask_app.run(debug=True)
+    app.run(debug=True)
