@@ -4,3 +4,4 @@ Flask==2.1.2
 supervisor==4.2.5
 gunicorn
 requests
+werkzeug==2.3.8
