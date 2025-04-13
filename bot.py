@@ -4,10 +4,10 @@ import shutil
 import tempfile
 import subprocess
 import threading
-import time
 from uuid import uuid4
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from flask import Flask
 
 # Logging setup
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -218,6 +218,13 @@ def cleanup_session(user_id):
     shutil.rmtree(user_sessions[user_id]["tempdir"], ignore_errors=True)
     del user_sessions[user_id]
 
+# --- Initialize Flask App ---
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!"
+
 # --- Main App ---
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
@@ -236,3 +243,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    flask_app.run(debug=True)
